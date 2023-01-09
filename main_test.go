@@ -2,19 +2,6 @@ package main
 
 import "testing"
 
-func Test_processURL(t *testing.T) {
-	type args struct {
-		url string
-	}
-	tests := []struct {
-		name string
-		args args
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			processURL(tt.args.url)
-		})
-	}
+func Test_main(t *testing.T) {
+	//todo
 }

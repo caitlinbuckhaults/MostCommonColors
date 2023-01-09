@@ -2,9 +2,10 @@ package imageprocessor
 
 import (
 	"fmt"
-	"github.com/XuanMaoSecLab/kmeans"
 	"image"
 	"image/color"
+	"math"
+	"math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -27,7 +28,7 @@ var (
 	client = &http.Client{Transport: transport}
 )
 
-func ProcessImageSimpleish(url string) ([]color.Color, error) {
+func ProcessImageSimple(url string) ([]color.Color, error) {
 	resp, err := client.Get(url)
 	if err != nil {
 		return nil, err
@@ -59,7 +60,7 @@ func ProcessImageOptimized(url string) error {
 	}
 
 	//extract the dominant colors
-	colors := extractDominantColors(img)
+	colors := extractDominantColorsKmeans(img)
 
 	//writeout
 	mu.Lock()
@@ -73,7 +74,8 @@ func ProcessImageOptimized(url string) error {
 	_, err = file.WriteString(url)
 	for _, c := range colors {
 		_, err = file.WriteString(",")
-		_, err = file.WriteString(fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B))
+		r, g, b, _ := c.RGBA()
+		_, err = file.WriteString(fmt.Sprintf("#%02x%02x%02x", r, g, b))
 	}
 	_, err = file.WriteString("\n")
 	if err != nil {
@@ -87,16 +89,15 @@ func ProcessImageOptimized(url string) error {
 //Counts the number of pixels of each color in the image, and
 //return the 3 most common colors.
 func extractDominantColors(img image.Image) []color.Color {
-	//we're hardcoded to returning the top three colors for now, but this can
-	//be updated to return as many as we want instead or refactored to respond
-	//to an external input if we want instead (GUI? Config File? ETC)
-	var countOfColorsToReturn = 3
 
 	//create a map for each color's count
 	colorCount := make(map[color.Color]int)
 	//loop through each pixel in the image and increment the count for the appropriate color
-	for _, c := range image.RGBAColorModel.Convert(img).([]color.RGBA) {
-		colorCount[c]++
+	bounds := img.Bounds()
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			colorCount[img.At(x, y)]++
+		}
 	}
 
 	//sort our color counts
@@ -104,6 +105,7 @@ func extractDominantColors(img image.Image) []color.Color {
 	for c := range colorCount {
 		colors = append(colors, c)
 	}
+
 	//I could handcraft a more efficient sorting algorithm here, however
 	//the compiler under the hood is likely pattern matching this code and
 	//optimizing it better than I could. I'll leave it as is until I need
@@ -112,28 +114,90 @@ func extractDominantColors(img image.Image) []color.Color {
 		return colorCount[colors[i]] > colorCount[colors[j]]
 	})
 
-	//return the top colors, capped by our return quantity choice.
-	if len(colors) > countOfColorsToReturn {
-		return colors[:countOfColorsToReturn]
-	}
-	return colors
+	// Return the 3 most prevalent colors
+	return []color.Color{colors[0], colors[1], colors[2]}
 }
 
 func extractDominantColorsKmeans(img image.Image) []color.Color {
-	//convert the image to a slice of kmeans.Vectors
-	var vectors []kmeans.Vector
-	for _, c := range image.RGBA.ColorModel().Convert(img).([]color.Color) {
-		vectors = append(vectors, kmeans.Vector{float64(c.R), float64(c.G), floats64(c.B)})
+	//initialize the centroids with random pixels
+	pixels := getPixels(img)
+	centroids := []color.Color{pixels[rand.Intn(len(pixels))], pixels[rand.Intn(len(pixels))], pixels[rand.Intn(len(pixels))]}
+
+	//iterate until the centroids converge
+	for {
+		//assign each pixel to its nearest centroid
+		clusters := [][]color.Color{{}, {}, {}}
+
+		for _, p := range pixels {
+			minimumDistance := math.MaxFloat64
+			minimumIndex := 0
+			for i, c := range centroids {
+				distance := distance(p, c)
+				if distance < minimumDistance {
+					minimumDistance = distance
+					minimumIndex = i
+				}
+			}
+			clusters[minimumIndex] = append(clusters[minimumIndex], p)
+		}
+		// calculate the new centroids
+		newCentroids := []color.Color{averageColor(clusters[0]), averageColor(clusters[1]), averageColor(clusters[2])}
+		//have the centroids converged yet?
+		if centroidsEqual(centroids, newCentroids) {
+			return centroids
+		}
+		//if not, update the centroids
+		centroids = newCentroids
 	}
-
-	// group the pixels into clusters
-	clusters := kmeans.KMeans(vectors, 3)
-
-	//return the centroids of the largest clusters as the dominant colors
-	var colors []color.Color
-	for _, c := range clusters {
-		colors = append(colors, color.RGBA[uint8(c.Centroid[0]), uint8(c.Centroid[1]), uint8(c.Centroid[2]), 255})
 }
-return colors
-	}
 
+//return a slice of color.RGBA values for the pixels in a given image
+func getPixels(img image.Image) []color.Color {
+	bounds := img.Bounds()
+	var pixels []color.Color
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			pixels = append(pixels, img.At(x, y))
+		}
+	}
+	return pixels
+}
+
+//get the euclidean distance between two colors
+func distance(c1, c2 color.Color) float64 {
+	r1, g1, b1, _ := c1.RGBA()
+	r2, g2, b2, _ := c2.RGBA()
+	return math.Sqrt(float64((r1-r2)*(r1-r2) + (g1-g2)*(g1-g2) + (b1-b2)*(b1-b2)))
+}
+
+//return the average of a slice of colors.
+func averageColor(colors []color.Color) color.Color {
+	var r, g, b float64
+	for _, c := range colors {
+		r1, g1, b1, _ := c.RGBA()
+		r += float64(r1)
+		g += float64(g1)
+		b += float64(b1)
+	}
+	n := float64(len(colors))
+	return color.RGBA{uint8(r / n), uint8(g / n), uint8(b / n), 255}
+}
+
+//are the two centroids slices the same?
+func centroidsEqual(c1, c2 []color.Color) bool {
+	if len(c1) != len(c2) {
+		return false
+	}
+	for i := range c1 {
+		if c1[i] != c2[i] {
+			return false
+		}
+	}
+	return true
+}
+
+//a simple tuple of our pixel color and how many times we've seen it
+type colorWithCount struct {
+	color color.Color
+	count int
+}
