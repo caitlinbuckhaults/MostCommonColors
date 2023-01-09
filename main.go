@@ -16,14 +16,14 @@ const (
 func main() {
 	//set up a buffered channel to pass URLs to the goroutines
 	urlChan := make(chan string, maxGoroutines)
-
 	//read input file & parse image URLs
 	file, err := os.Open("input.txt")
 	if err != nil {
-		fmt.Errorf("CAN'T GET INPUT FILE")
+		fmt.Println("Problem opening input file: ", err)
 	}
 	defer file.Close()
 
+	fmt.Println("file successfully opened")
 	scanner := bufio.NewScanner(file)
 
 	//foreach url, process image
@@ -33,7 +33,12 @@ func main() {
 		go func() {
 			defer wg.Done()
 			for url := range urlChan {
-				imageprocessor.ProcessImageOptimized(url)
+				fmt.Println("Proccessing file at: ", url)
+				err := imageprocessor.ProcessImageOptimized(url)
+				if err != nil {
+					wg.Done()
+					return
+				}
 			}
 		}()
 	}
@@ -41,9 +46,9 @@ func main() {
 		urlChan <- scanner.Text()
 	}
 	if err := scanner.Err(); err != nil {
-		fmt.Errorf("Problem Reading File Contents")
+		fmt.Println("Problem Reading File Contents: ", err)
 	}
-
+	fmt.Println("got through to the wait")
 	wg.Wait()
 
 }

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/jpeg"
+	"io"
 	"math"
 	"math/rand"
 	"net"
@@ -47,26 +49,30 @@ func ProcessImageSimple(url string) ([]color.Color, error) {
 func ProcessImageOptimized(url string) error {
 
 	//download the img
-	resp, err := client.Get(url)
+	resp, err := http.Get(url)
 	if err != nil {
+		fmt.Println("Problem downloading the image at ", url, " : ", err)
 		return err
 	}
 	defer resp.Body.Close()
 
 	//decode the img
-	img, _, err := image.Decode(resp.Body)
+	img, err := decodeJpeg(resp.Body)
 	if err != nil {
+		fmt.Println("Problem decoding the image at ", url, " : ", err)
 		return err
 	}
 
 	//extract the dominant colors
 	colors := extractDominantColorsKmeans(img)
+	fmt.Println("Dominant colors successfully extracted")
 
 	//writeout
 	mu.Lock()
 	defer mu.Unlock()
 	file, err := os.OpenFile("output.csv", os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
+		fmt.Println("Can't Open output.csv: ", err)
 		return err
 	}
 	defer file.Close()
@@ -75,10 +81,12 @@ func ProcessImageOptimized(url string) error {
 	for _, c := range colors {
 		_, err = file.WriteString(",")
 		r, g, b, _ := c.RGBA()
+		fmt.Println("Color: ", r, g, b)
 		_, err = file.WriteString(fmt.Sprintf("#%02x%02x%02x", r, g, b))
 	}
 	_, err = file.WriteString("\n")
 	if err != nil {
+		fmt.Println("Problem writing out to the file: ", err)
 		return err
 
 	}
@@ -196,8 +204,12 @@ func centroidsEqual(c1, c2 []color.Color) bool {
 	return true
 }
 
-//a simple tuple of our pixel color and how many times we've seen it
-type colorWithCount struct {
-	color color.Color
-	count int
+func decodeJpeg(reader io.Reader) (image.Image, error) {
+
+	img, err := jpeg.Decode(reader)
+	if err != nil {
+		fmt.Println("Problem jpeg decoding the file: ", err)
+		return nil, err
+	}
+	return img, nil
 }
