@@ -4,51 +4,55 @@ import (
 	"MostCommonColors/imageprocessor"
 	"bufio"
 	"fmt"
+	"image/color"
 	"os"
 	"sync"
 )
 
-const (
-	maxGoroutines   = 100
-	maxHTTPRequests = 1000
-)
+var wg sync.WaitGroup
 
 func main() {
-	//set up a buffered channel to pass URLs to the goroutines
-	urlChan := make(chan string, maxGoroutines)
-	//read input file & parse image URLs
-	file, err := os.Open("input.txt")
+
+	//open the file
+	file, err := os.Open("hugeinput.txt")
 	if err != nil {
-		fmt.Println("Problem opening input file: ", err)
+		fmt.Println("Error opening file: ", err)
+		return
 	}
 	defer file.Close()
 
-	fmt.Println("file successfully opened")
+	//read the file line by line
 	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		//parse the URL
+		url := scanner.Text()
+		fmt.Println("URL: ", url)
+		resultChan := make(chan []color.Color)
+		errorChan := make(chan error)
 
-	//foreach url, process image
-	var wg sync.WaitGroup
-	for i := 0; i < maxGoroutines; i++ {
+		//process the image
+		wg.Add(1)
+
+		// Launch a goroutine to download and process the image
 		wg.Add(1)
 		go func() {
-			defer wg.Done()
-			for url := range urlChan {
-				fmt.Println("Proccessing file at: ", url)
-				err := imageprocessor.ProcessImageOptimized(url)
-				if err != nil {
-					wg.Done()
-					return
-				}
-			}
+			fmt.Println("Downloading and processing ", url)
+			imageprocessor.DownloadAndProcessImage(url, resultChan, errorChan)
+			wg.Done()
+		}()
+
+		// Launch a goroutine to write the results to the CSV file
+		wg.Add(1)
+		go func() {
+			fmt.Println("Writing Results ", url)
+			imageprocessor.WriteResultsToCSV(url, <-resultChan, errorChan)
+			wg.Done()
 		}()
 	}
-	for scanner.Scan() {
-		urlChan <- scanner.Text()
-	}
-	if err := scanner.Err(); err != nil {
-		fmt.Println("Problem Reading File Contents: ", err)
-	}
-	fmt.Println("got through to the wait")
-	wg.Wait()
 
+	//did we have a problem scanning?
+	if err := scanner.Err(); err != nil {
+		fmt.Println("Error scanning file: ", err)
+	}
+	wg.Wait()
 }

@@ -29,6 +29,7 @@ var (
 	}
 	client = &http.Client{Transport: transport}
 )
+var wg sync.WaitGroup
 
 func ProcessImageSimple(url string) ([]color.Color, error) {
 	resp, err := client.Get(url)
@@ -46,51 +47,56 @@ func ProcessImageSimple(url string) ([]color.Color, error) {
 	return extractDominantColors(img), nil
 }
 
-func ProcessImageOptimized(url string) error {
-
-	//download the img
+//processes an image given the URL, extracts the dominant colors, and writes results
+//to a CSV
+func DownloadAndProcessImage(url string, resultChan chan []color.Color, errorChan chan error) {
+	//download the image
 	resp, err := http.Get(url)
 	if err != nil {
-		fmt.Println("Problem downloading the image at ", url, " : ", err)
-		return err
+		errorChan <- fmt.Errorf("problem downloading the image at %s: %v", url, err)
+		return
 	}
 	defer resp.Body.Close()
 
-	//decode the img
+	//decode the image
 	img, err := decodeJpeg(resp.Body)
 	if err != nil {
-		fmt.Println("Problem decoding the image at ", url, " : ", err)
-		return err
+		errorChan <- fmt.Errorf("problem decoding the image at %s: %v", url, err)
+		return
 	}
 
-	//extract the dominant colors
-	colors := extractDominantColorsKmeans(img)
+	//extract the top 3 colors
+	colors := extractDominantColors(img)
+	resultChan <- colors
 	fmt.Println("Dominant colors successfully extracted")
 
-	//writeout
-	mu.Lock()
-	defer mu.Unlock()
-	file, err := os.OpenFile("output.csv", os.O_APPEND|os.O_WRONLY, 0644)
+	return
+}
+
+func WriteResultsToCSV(url string, colors []color.Color, errorChan chan error) {
+	// Open the CSV file
+	file, err := os.OpenFile("output.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
-		fmt.Println("Can't Open output.csv: ", err)
-		return err
+		errorChan <- fmt.Errorf("can't open output.csv: %v", err)
+		fmt.Println("can't open output.csv: %v", err)
+		return
 	}
 	defer file.Close()
 
+	// Write the URL and dominant colors to the CSV file
 	_, err = file.WriteString(url)
 	for _, c := range colors {
 		_, err = file.WriteString(",")
 		r, g, b, _ := c.RGBA()
-		fmt.Println("Color: ", r, g, b)
 		_, err = file.WriteString(fmt.Sprintf("#%02x%02x%02x", r, g, b))
 	}
 	_, err = file.WriteString("\n")
 	if err != nil {
-		fmt.Println("Problem writing out to the file: ", err)
-		return err
-
+		errorChan <- fmt.Errorf("problem writing out to the file: %v", err)
+		fmt.Println("problem writing out to the file: %v", err)
+		return
 	}
-	return nil
+	return
 }
 
 //Simplest approach to extracting the dominant colors.
@@ -123,6 +129,7 @@ func extractDominantColors(img image.Image) []color.Color {
 	})
 
 	// Return the 3 most prevalent colors
+	fmt.Println("Dominant Colors: ", colors[0], colors[1], colors[2])
 	return []color.Color{colors[0], colors[1], colors[2]}
 }
 
@@ -150,6 +157,7 @@ func extractDominantColorsKmeans(img image.Image) []color.Color {
 		}
 		// calculate the new centroids
 		newCentroids := []color.Color{averageColor(clusters[0]), averageColor(clusters[1]), averageColor(clusters[2])}
+		fmt.Println("New Centroids: ", newCentroids)
 		//have the centroids converged yet?
 		if centroidsEqual(centroids, newCentroids) {
 			return centroids
