@@ -8,46 +8,12 @@ import (
 	"io"
 	"math"
 	"math/rand"
-	"net"
 	"net/http"
 	"os"
 	"sort"
-	"sync"
-	"time"
 )
 
-var (
-	mu        sync.Mutex
-	transport = &http.Transport{
-		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: 100,
-		IdleConnTimeout:     90 * time.Second,
-	}
-	client = &http.Client{Transport: transport}
-)
-var wg sync.WaitGroup
-
-func ProcessImageSimple(url string) ([]color.Color, error) {
-	resp, err := client.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	//decode
-	img, _, err := image.Decode(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	return extractDominantColors(img), nil
-}
-
-//processes an image given the URL, extracts the dominant colors, and writes results
+// DownloadAndProcessImage processes an image given the URL, extracts the dominant colors, and writes results
 //to a CSV
 func DownloadAndProcessImage(url string, resultChan chan []color.Color, errorChan chan error) {
 	//download the image
@@ -89,6 +55,7 @@ func WriteResultsToCSV(url string, colors []color.Color, errorChan chan error) {
 		_, err = file.WriteString(",")
 		r, g, b, _ := c.RGBA()
 		_, err = file.WriteString(fmt.Sprintf("#%02x%02x%02x", r, g, b))
+		fmt.Println("DONE! ", url, r, g, b)
 	}
 	_, err = file.WriteString("\n")
 	if err != nil {
@@ -133,6 +100,7 @@ func extractDominantColors(img image.Image) []color.Color {
 	return []color.Color{colors[0], colors[1], colors[2]}
 }
 
+//goland:noinspection SpellCheckingInspection
 func extractDominantColorsKmeans(img image.Image) []color.Color {
 	//initialize the centroids with random pixels
 	pixels := getPixels(img)
@@ -157,9 +125,9 @@ func extractDominantColorsKmeans(img image.Image) []color.Color {
 		}
 		// calculate the new centroids
 		newCentroids := []color.Color{averageColor(clusters[0]), averageColor(clusters[1]), averageColor(clusters[2])}
-		fmt.Println("New Centroids: ", newCentroids)
 		//have the centroids converged yet?
 		if centroidsEqual(centroids, newCentroids) {
+			fmt.Println("Centroids Converged!")
 			return centroids
 		}
 		//if not, update the centroids
@@ -169,8 +137,11 @@ func extractDominantColorsKmeans(img image.Image) []color.Color {
 
 //return a slice of color.RGBA values for the pixels in a given image
 func getPixels(img image.Image) []color.Color {
+	//get the image dimensions
 	bounds := img.Bounds()
-	var pixels []color.Color
+	//initialize the pixel slice
+	pixels := make([]color.Color, 0, bounds.Max.X*bounds.Max.Y)
+	//iterate over the pixels
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
 		for x := bounds.Min.X; x < bounds.Max.X; x++ {
 			pixels = append(pixels, img.At(x, y))
@@ -188,15 +159,20 @@ func distance(c1, c2 color.Color) float64 {
 
 //return the average of a slice of colors.
 func averageColor(colors []color.Color) color.Color {
-	var r, g, b float64
+	var r, g, b uint32
 	for _, c := range colors {
 		r1, g1, b1, _ := c.RGBA()
-		r += float64(r1)
-		g += float64(g1)
-		b += float64(b1)
+		r += r1
+		g += g1
+		b += b1
 	}
-	n := float64(len(colors))
-	return color.RGBA{uint8(r / n), uint8(g / n), uint8(b / n), 255}
+	n := uint32(len(colors))
+	if n > 0 {
+		return color.RGBA{uint8(r / n), uint8(g / n), uint8(b / n), 255}
+
+	} else {
+		return color.RGBA{0, 0, 0, 0}
+	}
 }
 
 //are the two centroids slices the same?
@@ -204,8 +180,8 @@ func centroidsEqual(c1, c2 []color.Color) bool {
 	if len(c1) != len(c2) {
 		return false
 	}
-	for i := range c1 {
-		if c1[i] != c2[i] {
+	for i, c := range c1 {
+		if c != c2[i] {
 			return false
 		}
 	}
