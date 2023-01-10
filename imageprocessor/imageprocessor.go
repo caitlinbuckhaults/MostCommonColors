@@ -4,47 +4,18 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"image/jpeg"
-	"io"
 	"math"
 	"math/rand"
-	"net/http"
 	"os"
 	"sort"
 )
-
-// DownloadAndProcessImage processes an image given the URL, extracts the dominant colors, and writes results
-//to a CSV
-func DownloadAndProcessImage(url string, resultChan chan []color.Color, errorChan chan error) {
-	//download the image
-	resp, err := http.Get(url)
-	if err != nil {
-		errorChan <- fmt.Errorf("problem downloading the image at %s: %v", url, err)
-		return
-	}
-	defer resp.Body.Close()
-
-	//decode the image
-	img, err := decodeJpeg(resp.Body)
-	if err != nil {
-		errorChan <- fmt.Errorf("problem decoding the image at %s: %v", url, err)
-		return
-	}
-
-	//extract the top 3 colors
-	colors := extractDominantColors(img)
-	resultChan <- colors
-	fmt.Println("Dominant colors successfully extracted")
-
-	return
-}
 
 func WriteResultsToCSV(url string, colors []color.Color, errorChan chan error) {
 	// Open the CSV file
 	file, err := os.OpenFile("output.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
 		errorChan <- fmt.Errorf("can't open output.csv: %v", err)
-		fmt.Println("can't open output.csv: %v", err)
+		fmt.Println("can't open output.csv: ", err)
 		return
 	}
 	defer file.Close()
@@ -60,7 +31,7 @@ func WriteResultsToCSV(url string, colors []color.Color, errorChan chan error) {
 	_, err = file.WriteString("\n")
 	if err != nil {
 		errorChan <- fmt.Errorf("problem writing out to the file: %v", err)
-		fmt.Println("problem writing out to the file: %v", err)
+		fmt.Println("problem writing out to the file: ", err)
 		return
 	}
 	return
@@ -69,7 +40,7 @@ func WriteResultsToCSV(url string, colors []color.Color, errorChan chan error) {
 //Simplest approach to extracting the dominant colors.
 //Counts the number of pixels of each color in the image, and
 //return the 3 most common colors.
-func extractDominantColors(img image.Image) []color.Color {
+func ExtractDominantColors(img image.Image) []color.Color {
 
 	//create a map for each color's count
 	colorCount := make(map[color.Color]int)
@@ -154,7 +125,11 @@ func getPixels(img image.Image) []color.Color {
 func distance(c1, c2 color.Color) float64 {
 	r1, g1, b1, _ := c1.RGBA()
 	r2, g2, b2, _ := c2.RGBA()
-	return math.Sqrt(float64((r1-r2)*(r1-r2) + (g1-g2)*(g1-g2) + (b1-b2)*(b1-b2)))
+	rInt := int32(r1) - int32(r2)
+	gInt := int32(g1) - int32(g2)
+	bInt := int32(b1) - int32(b2)
+
+	return math.Sqrt(float64(rInt*rInt + gInt*gInt + bInt*bInt))
 }
 
 //return the average of a slice of colors.
@@ -186,14 +161,4 @@ func centroidsEqual(c1, c2 []color.Color) bool {
 		}
 	}
 	return true
-}
-
-func decodeJpeg(reader io.Reader) (image.Image, error) {
-
-	img, err := jpeg.Decode(reader)
-	if err != nil {
-		fmt.Println("Problem jpeg decoding the file: ", err)
-		return nil, err
-	}
-	return img, nil
 }

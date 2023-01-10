@@ -1,68 +1,63 @@
 package main
 
 import (
+	"MostCommonColors/fileManager"
 	"MostCommonColors/imageprocessor"
-	"bufio"
 	"fmt"
-	"image/color"
-	"os"
+	"image"
 	"sync"
 )
 
 var wg sync.WaitGroup
 
 func main() {
+	mostCommonColors := []DecodedImage{}
 
-	//open the file
-	file, err := os.Open("input.txt")
+	//import the set of URLs to process
+	processedURLs, err := fileManager.ImportURLs("input.txt")
 	if err != nil {
-		fmt.Println("Error opening file: ", err)
-		return
+		fmt.Println("Error : ", err)
 	}
-	defer file.Close()
 
-	//create a map of already seen URLs
-	processedURLs := make(map[string]bool)
-	urlCount := 0
-
-	//read the file line by line
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		//parse the URL
-		url := scanner.Text()
-		urlCount++
-		fmt.Println(" Begin URL #", urlCount, ": ", url)
-
-		//have we seen this one before? if so, skip it
-		if _, ok := processedURLs[url]; ok {
+	//download the images and decode them into image filetype files
+	for u, _ := range processedURLs {
+		i, err := fileManager.DownloadAndDecodeImage(u)
+		if err != nil {
+			fmt.Println("Error Decoding the Image :", err)
 			continue
 		}
-		processedURLs[url] = true
-		fmt.Println("Processed URLs: ", len(processedURLs))
 
-		resultChan := make(chan []color.Color)
-		errorChan := make(chan error)
-
-		// Launch a goroutine to download and process the image
-		wg.Add(1)
-		go func() {
-			fmt.Println("Downloading and processing ", url)
-			imageprocessor.DownloadAndProcessImage(url, resultChan, errorChan)
-			wg.Done()
-		}()
-
-		// Launch a goroutine to write the results to the CSV file
-		wg.Add(1)
-		go func() {
-			fmt.Println("Writing Results ", url)
-			imageprocessor.WriteResultsToCSV(url, <-resultChan, errorChan)
-			wg.Done()
-		}()
+		decodedImage := DecodedImage{
+			url:              u,
+			img:              i,
+			mostCommonColors: "",
+		}
+		mostCommonColors = append(mostCommonColors, decodedImage)
 	}
-	wg.Wait()
-
-	//did we have a problem scanning?
-	if err := scanner.Err(); err != nil {
-		fmt.Println("Error scanning file: ", err)
+	//extract the dominant colors
+	for _, img := range mostCommonColors {
+		colors := imageprocessor.ExtractDominantColors(img)
+		fmt.Println("Colors ", colors)
+		for _, c := range colors {
+			_, err = file.WriteString(",")
+			r, g, b, _ := c.RGBA()
+			_, err = file.WriteString(fmt.Sprintf("#%02x%02x%02x", r, g, b))
+			fmt.Println("DONE! ", url, r, g, b)
+		}
+		_, err = file.WriteString("\n")
+		if err != nil {
+			errorChan <- fmt.Errorf("problem writing out to the file: %v", err)
+			fmt.Println("problem writing out to the file: ", err)
+			return
+		}
 	}
+
+	//write the data to the output file
+
+}
+
+type DecodedImage struct {
+	url              string
+	img              *image.RGBA
+	mostCommonColors string
 }
